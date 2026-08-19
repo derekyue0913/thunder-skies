@@ -46,6 +46,13 @@
   #hitmark::before { width:3px; height:26px; left:-1.5px; top:-13px; }
   #hitmark::after { width:26px; height:3px; left:-13px; top:-1.5px; }
 
+  /* 鼠标瞄准环 */
+  #aim { position:fixed; left:50%; top:50%; width:30px; height:30px; z-index:11;
+    border:2px solid rgba(140,220,255,.9); border-radius:50%; pointer-events:none;
+    transform:translate(-50%,-50%); box-shadow:0 0 8px rgba(140,220,255,.5); }
+  #aim::after { content:""; position:absolute; left:50%; top:50%; width:4px; height:4px;
+    background:rgba(140,220,255,.9); border-radius:50%; transform:translate(-50%,-50%); }
+
   /* 受击红闪 */
   #dmg { position:fixed; inset:0; pointer-events:none; z-index:9; opacity:0;
     background:radial-gradient(ellipse at center, transparent 40%, rgba(200,20,10,.55) 100%); }
@@ -67,6 +74,7 @@
   #final { font-size:18px; color:#ffd35c; margin-bottom:28px; line-height:2; display:none; }
   #vignette { position:fixed; inset:0; pointer-events:none; z-index:5;
     box-shadow:inset 0 0 180px rgba(0,0,0,.55); }
+  body.ingame { cursor:none; }
 </style>
 </head>
 <body>
@@ -95,18 +103,18 @@
   <div id="feed"></div>
   <div id="crosshair"></div>
   <div id="hitmark"></div>
+  <div id="aim"></div>
 </div>
 
 <div id="overlay">
   <h1>雷霆空战</h1>
-  <h2>THUNDER SKIES · 街机空战原型</h2>
+  <h2>THUNDER SKIES · 现代喷气机 · 鼠标操控</h2>
   <div id="final"></div>
   <div class="keys">
-    <div><b>W / S 或 ↑ / ↓</b>俯仰（S / ↓ 拉杆爬升）</div>
-    <div><b>A / D 或 ← / →</b>滚转转向</div>
-    <div><b>Shift / Ctrl</b>油门加 / 减</div>
+    <div><b>鼠标移动</b>瞄准转向（战雷式，自动压坡度）</div>
+    <div><b>W / S</b>油门加 / 减（Shift / Ctrl 亦可）</div>
     <div><b>空格</b>机炮射击</div>
-    <div><b>Q / E</b>方向舵微调</div>
+    <div><b>A / D · Q / E</b>滚转 / 方向舵微调</div>
   </div>
   <button id="start-btn">开 始 战 斗</button>
 </div>
@@ -244,62 +252,100 @@ const clouds = new THREE.Group();
 }
 
 /* ============================================================
-   飞机建模（程序化低多边形）
+   现代喷气战斗机建模（程序化低多边形）
+   group = 飞行动力学坐标系；visual = 滚转视觉层
 ============================================================ */
-function buildAircraft(bodyColor, wingColor){
+function buildJet(bodyColor, accentColor){
   const g = new THREE.Group();
-  const matBody = new THREE.MeshStandardMaterial({ color:bodyColor, metalness:0.35, roughness:0.55 });
-  const matWing = new THREE.MeshStandardMaterial({ color:wingColor, metalness:0.3, roughness:0.6 });
-  const matGlass = new THREE.MeshStandardMaterial({ color:0x9fd8ef, metalness:0.8, roughness:0.15 });
+  const visual = new THREE.Group();
+  g.add(visual);
+  const matBody = new THREE.MeshStandardMaterial({ color:bodyColor, metalness:0.55, roughness:0.35,
+    side:THREE.DoubleSide });
+  const matAccent = new THREE.MeshStandardMaterial({ color:accentColor, metalness:0.5, roughness:0.4 });
+  const matGlass = new THREE.MeshStandardMaterial({ color:0x9fd8ef, metalness:0.9, roughness:0.1 });
 
   // 机身（前向 +Z）
-  const fus = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.28, 7, 10).rotateX(Math.PI/2), matBody);
-  g.add(fus);
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.4, 10).rotateX(Math.PI/2), matBody);
-  nose.position.z = 4.2;
-  g.add(nose);
-  const cockpit = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 8), matGlass);
-  cockpit.position.set(0, 0.55, 0.8); cockpit.scale.set(0.8, 0.7, 1.6);
-  g.add(cockpit);
+  const fus = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.4, 9, 10).rotateX(Math.PI/2), matBody);
+  visual.add(fus);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.55, 2.2, 10).rotateX(Math.PI/2), matAccent);
+  nose.position.z = 5.6;
+  visual.add(nose);
+  const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.5, 12, 10), matGlass);
+  canopy.position.set(0, 0.55, 2.3); canopy.scale.set(0.75, 0.65, 1.9);
+  visual.add(canopy);
 
-  // 主翼 / 平尾 / 垂尾
-  const wing = new THREE.Mesh(new THREE.BoxGeometry(10.5, 0.14, 1.9), matWing);
-  wing.position.set(0, -0.1, 0.4);
-  g.add(wing);
-  const tail = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.12, 1.1), matWing);
-  tail.position.set(0, 0.15, -3.2);
-  g.add(tail);
-  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.4, 1.3), matWing);
-  fin.position.set(0, 0.7, -3.2);
-  g.add(fin);
+  // 后掠主翼
+  const wingShape = new THREE.Shape();
+  wingShape.moveTo(0.2, -1.1);
+  wingShape.lineTo(5.2, 0.5);
+  wingShape.lineTo(5.2, 1.3);
+  wingShape.lineTo(0.2, 2.3);
+  wingShape.closePath();
+  const wingGeo = new THREE.ExtrudeGeometry(wingShape, { depth:0.12, bevelEnabled:false });
+  wingGeo.rotateX(-Math.PI/2);
+  const wingR = new THREE.Mesh(wingGeo, matBody);
+  wingR.position.set(0, -0.15, 0.6);
+  const wingL = wingR.clone(); wingL.scale.x = -1;
+  visual.add(wingR, wingL);
 
-  // 螺旋桨
-  const prop = new THREE.Group();
-  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.22, 3.2, 0.08),
-    new THREE.MeshStandardMaterial({ color:0x222222 }));
-  const blade2 = blade.clone(); blade2.rotation.z = Math.PI/2;
-  prop.add(blade, blade2);
-  prop.position.z = 5.0;
-  g.add(prop);
+  // 平尾
+  const tailShape = new THREE.Shape();
+  tailShape.moveTo(0.15, -0.5);
+  tailShape.lineTo(2.4, 0.3);
+  tailShape.lineTo(2.4, 0.8);
+  tailShape.lineTo(0.15, 1.3);
+  tailShape.closePath();
+  const tailGeo = new THREE.ExtrudeGeometry(tailShape, { depth:0.1, bevelEnabled:false });
+  tailGeo.rotateX(-Math.PI/2);
+  const tailR = new THREE.Mesh(tailGeo, matAccent);
+  tailR.position.set(0, 0.05, -3.6);
+  const tailL = tailR.clone(); tailL.scale.x = -1;
+  visual.add(tailR, tailL);
 
-  // 翼下机炮（用于弹道起点）
-  const gunL = new THREE.Object3D(); gunL.position.set(-2.2, -0.1, 1.4); g.add(gunL);
-  const gunR = new THREE.Object3D(); gunR.position.set( 2.2, -0.1, 1.4); g.add(gunR);
+  // 双垂尾（外倾）
+  const finGeo = new THREE.BoxGeometry(0.12, 1.5, 1.5);
+  const finR = new THREE.Mesh(finGeo, matAccent);
+  finR.position.set(0.85, 0.8, -3.4); finR.rotation.z = -0.35;
+  const finL = new THREE.Mesh(finGeo, matAccent);
+  finL.position.set(-0.85, 0.8, -3.4); finL.rotation.z = 0.35;
+  visual.add(finR, finL);
 
-  g.traverse(o => { if(o.isMesh){ o.castShadow = true; } });
-  return { group:g, prop, gunL, gunR };
+  // 两侧进气道
+  const intakeGeo = new THREE.BoxGeometry(0.5, 0.6, 2.4);
+  const inR = new THREE.Mesh(intakeGeo, matAccent); inR.position.set(0.75, -0.2, 1.2);
+  const inL = new THREE.Mesh(intakeGeo, matAccent); inL.position.set(-0.75, -0.2, 1.2);
+  visual.add(inR, inL);
+
+  // 尾喷口 + 加力尾焰
+  const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.38, 0.6, 10).rotateX(Math.PI/2),
+    new THREE.MeshStandardMaterial({ color:0x333333, metalness:0.9, roughness:0.3 }));
+  nozzle.position.z = -4.7;
+  visual.add(nozzle);
+  const burner = new THREE.Mesh(
+    new THREE.ConeGeometry(0.4, 3.0, 10).rotateX(-Math.PI/2),
+    new THREE.MeshBasicMaterial({ color:0x7ec8ff, transparent:true, opacity:0.7,
+      blending:THREE.AdditiveBlending, depthWrite:false }));
+  burner.position.z = -6.2;
+  visual.add(burner);
+
+  // 翼根机炮（弹道起点）
+  const gunL = new THREE.Object3D(); gunL.position.set(-1.4, -0.1, 2.0); visual.add(gunL);
+  const gunR = new THREE.Object3D(); gunR.position.set( 1.4, -0.1, 2.0); visual.add(gunR);
+
+  g.traverse(o => { if(o.isMesh && o !== burner){ o.castShadow = true; } });
+  return { group:g, visual, burner, gunL, gunR };
 }
 
 /* ============================================================
    玩家
 ============================================================ */
-const player = buildAircraft(0x4a6741, 0x3b5233);
+const player = buildJet(0x7a8a94, 0x4e5a64);
 scene.add(player.group);
 
 const P = {
-  pos: new THREE.Vector3(0, 220, 0),
+  pos: new THREE.Vector3(0, 260, 0),
   quat: new THREE.Quaternion(),
-  speed: 55, throttle: 0.55, hp: 100,
+  speed: 140, throttle: 0.5, hp: 100, bank: 0,
   alive: true, fireTimer: 0, gunSide: 0,
 };
 player.group.position.copy(P.pos);
@@ -308,39 +354,52 @@ const keys = {};
 addEventListener('keydown', e => { keys[e.code] = true; if(e.code==='Space') e.preventDefault(); });
 addEventListener('keyup',   e => { keys[e.code] = false; });
 
+// 鼠标（NDC 坐标）+ 瞄准环跟随
+const mouse = { x:0, y:0 };
+const aimEl = document.getElementById('aim');
+addEventListener('mousemove', e => {
+  mouse.x = (e.clientX/innerWidth)*2 - 1;
+  mouse.y = -(e.clientY/innerHeight)*2 + 1;
+  aimEl.style.left = e.clientX + 'px';
+  aimEl.style.top  = e.clientY + 'px';
+});
+
 const AXIS_X = new THREE.Vector3(1,0,0), AXIS_Y = new THREE.Vector3(0,1,0), AXIS_Z = new THREE.Vector3(0,0,1);
 const _dq = new THREE.Quaternion(), _fwd = new THREE.Vector3(), _up = new THREE.Vector3();
+const _ray = new THREE.Vector3(), _aim = new THREE.Vector3();
 
 function updatePlayer(dt){
   if(!P.alive) return;
 
-  // ---- 输入 ----
-  let pitch = 0, roll = 0, yaw = 0;
-  if(keys['KeyS'] || keys['ArrowDown']) pitch += 1;   // 拉杆
-  if(keys['KeyW'] || keys['ArrowUp'])   pitch -= 1;   // 推杆
-  if(keys['KeyA'] || keys['ArrowLeft']) roll += 1;
+  // ---- 油门 ----
+  if(keys['KeyW'] || keys['ShiftLeft'] || keys['ShiftRight']) P.throttle = Math.min(1, P.throttle + 0.5*dt);
+  if(keys['KeyS'] || keys['ControlLeft'] || keys['ControlRight']) P.throttle = Math.max(0.12, P.throttle - 0.5*dt);
+
+  // ---- 鼠标瞄准转向（战雷式：机头追随鼠标指向）----
+  _ray.set(mouse.x, mouse.y, 0.5).unproject(camera).sub(camera.position).normalize();
+  _aim.copy(camera.position).addScaledVector(_ray, 500).sub(P.pos).normalize();
+  _up.set(0,1,0).applyQuaternion(P.quat);              // 以当前机身向上为参考，避免万向锁
+  _m1.lookAt(P.pos, _v1.copy(P.pos).sub(_aim), _up);
+  _q1.setFromRotationMatrix(_m1);
+  const turnRate = 1.3 + Math.min(P.speed/340, 1) * 1.0;   // 高速更灵活（街机手感）
+  P.quat.rotateTowards(_q1, turnRate * dt);
+
+  // ---- 手动微调：A/D 滚转，Q/E 方向舵 ----
+  let roll = 0, yaw = 0;
+  if(keys['KeyA'] || keys['ArrowLeft'])  roll += 1;
   if(keys['KeyD'] || keys['ArrowRight']) roll -= 1;
   if(keys['KeyQ']) yaw += 1;
   if(keys['KeyE']) yaw -= 1;
-  if(keys['ShiftLeft'] || keys['ShiftRight']) P.throttle = Math.min(1, P.throttle + 0.6*dt);
-  if(keys['ControlLeft'] || keys['ControlRight']) P.throttle = Math.max(0.15, P.throttle - 0.6*dt);
-
-  // ---- 姿态 ----
-  const rollRate = 2.2, pitchRate = 1.25, yawRate = 0.55;
-  _dq.setFromAxisAngle(AXIS_X, pitch * pitchRate * dt); P.quat.multiply(_dq);
-  _dq.setFromAxisAngle(AXIS_Z, roll  * rollRate  * dt); P.quat.multiply(_dq);
-  _dq.setFromAxisAngle(AXIS_Y, yaw   * yawRate   * dt); P.quat.multiply(_dq);
-  // 协调转弯：滚转自动带一点偏航
-  const bank = new THREE.Vector3(1,0,0).applyQuaternion(P.quat).y;
-  _dq.setFromAxisAngle(AXIS_Y, -bank * 0.9 * dt); P.quat.multiply(_dq);
+  _dq.setFromAxisAngle(AXIS_Z, roll * 1.8 * dt); P.quat.multiply(_dq);
+  _dq.setFromAxisAngle(AXIS_Y, yaw  * 0.5 * dt); P.quat.multiply(_dq);
   P.quat.normalize();
 
-  // ---- 速度 / 位置 ----
-  const target = 22 + P.throttle * 105;
-  P.speed += (target - P.speed) * Math.min(1, 0.7*dt);
+  // ---- 速度 / 位置（喷气机包线：324 ~ 1224 km/h）----
+  const target = 90 + P.throttle * 250;
+  P.speed += (target - P.speed) * Math.min(1, 0.45*dt);
   _fwd.set(0,0,1).applyQuaternion(P.quat);
   const vel = _fwd.clone().multiplyScalar(P.speed);
-  if(P.speed < 38) vel.y -= (38 - P.speed) * 0.55;   // 失速下坠
+  if(P.speed < 105) vel.y -= (105 - P.speed) * 0.6;   // 失速下坠
   P.pos.addScaledVector(vel, dt);
 
   // ---- 撞地 ----
@@ -352,12 +411,22 @@ function updatePlayer(dt){
 
   player.group.position.copy(P.pos);
   player.group.quaternion.copy(P.quat);
-  player.prop.rotation.z += (8 + P.throttle*40) * dt;
+
+  // ---- 滚转视觉：瞄准点横向偏差 → 自动压坡度 ----
+  const right = _v1.set(1,0,0).applyQuaternion(P.quat);
+  const lat = THREE.MathUtils.clamp(_aim.dot(right), -1, 1);
+  P.bank += ((-lat * 1.15) - P.bank) * Math.min(1, 6*dt);
+  player.visual.rotation.z = P.bank;
+
+  // ---- 加力尾焰随油门 ----
+  const bs = 0.35 + P.throttle * 1.2;
+  player.burner.scale.set(bs, bs, 0.4 + P.throttle * 1.8);
+  player.burner.material.opacity = 0.2 + P.throttle * 0.65;
 
   // ---- 开火 ----
   P.fireTimer -= dt;
   if(keys['Space'] && P.fireTimer <= 0){
-    P.fireTimer = 1/14;
+    P.fireTimer = 1/16;
     const gun = (P.gunSide ^= 1) ? player.gunL : player.gunR;
     const gp = new THREE.Vector3(); gun.getWorldPosition(gp);
     spawnBullet(gp, _fwd, true);
@@ -368,18 +437,18 @@ function updatePlayer(dt){
 /* ============================================================
    追机视角
 ============================================================ */
-const camPos = new THREE.Vector3().copy(P.pos).add(new THREE.Vector3(0,4,-14));
+const camPos = new THREE.Vector3().copy(P.pos).add(new THREE.Vector3(0,5,-18));
 function updateCamera(dt){
   _fwd.set(0,0,1).applyQuaternion(P.quat);
   _up.set(0,1,0).applyQuaternion(P.quat);
   const desired = P.pos.clone()
-    .addScaledVector(_fwd, -13)
-    .addScaledVector(_up, 4);
+    .addScaledVector(_fwd, -16)
+    .addScaledVector(_up, 5);
   camPos.lerp(desired, 1 - Math.pow(0.0005, dt));
   camera.position.copy(camPos);
   camera.up.set(0,1,0);
-  camera.lookAt(P.pos.clone().addScaledVector(_fwd, 30));
-  camera.fov = 68 + (P.speed/127) * 14;   // 速度感
+  camera.lookAt(P.pos.clone().addScaledVector(_fwd, 40));
+  camera.fov = 66 + (P.speed/340) * 16;   // 速度感
   camera.updateProjectionMatrix();
   sun.position.copy(P.pos).add(new THREE.Vector3(800, 1200, 400));
   sun.target = player.group;
@@ -402,8 +471,8 @@ function spawnBullet(origin, dir, fromPlayer){
   const d = dir.clone().normalize();
   d.x += (Math.random()-0.5)*spread; d.y += (Math.random()-0.5)*spread; d.z += (Math.random()-0.5)*spread;
   bullets.push({
-    mesh:m, fromPlayer, life:2.2,
-    vel: d.normalize().multiplyScalar(fromPlayer ? 380 : 300)
+    mesh:m, fromPlayer, life:2.5,
+    vel: d.normalize().multiplyScalar(fromPlayer ? 620 : 520)
          .add(fromPlayer ? _fwd.clone().multiplyScalar(P.speed) : new THREE.Vector3()),
   });
 }
@@ -500,18 +569,18 @@ const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q1 = new THREE.Quat
 const _m1 = new THREE.Matrix4();
 
 function spawnEnemy(){
-  const model = buildAircraft(0x6e3a2e, 0x55291f);
+  const model = buildJet(0x8a3a32, 0x55231e);
   const ang = Math.random()*Math.PI*2;
-  const dist = 700 + Math.random()*900;
+  const dist = 900 + Math.random()*900;
   const pos = new THREE.Vector3(
     P.pos.x + Math.cos(ang)*dist,
-    Math.max(120, P.pos.y + (Math.random()-0.5)*400),
+    Math.max(200, P.pos.y + (Math.random()-0.5)*500),
     P.pos.z + Math.sin(ang)*dist);
   model.group.position.copy(pos);
   scene.add(model.group);
   const e = {
-    obj: model.group, prop: model.prop, hp: 3, alive: true,
-    speed: 62 + Math.random()*18, fireCd: 1 + Math.random()*2,
+    obj: model.group, burner: model.burner, hp: 3, alive: true,
+    speed: 140 + Math.random()*70, fireCd: 1 + Math.random()*2,
     waypoint: randomWaypoint(pos),
   };
   // 初始朝向：面向玩家
@@ -535,36 +604,39 @@ function updateEnemies(dt){
 
     // 目标选择：追玩家 / 巡逻
     let target;
-    if(P.alive && dist < 1100){
+    if(P.alive && dist < 1600){
       // 前置量瞄准点
       target = _v2.copy(P.pos)
-        .addScaledVector(_fwd.set(0,0,1).applyQuaternion(P.quat), P.speed * dist/300 * 0.6);
+        .addScaledVector(_fwd.set(0,0,1).applyQuaternion(P.quat), P.speed * dist/520 * 0.8);
     } else {
-      if(pos.distanceTo(e.waypoint) < 120) e.waypoint = randomWaypoint(pos);
+      if(pos.distanceTo(e.waypoint) < 150) e.waypoint = randomWaypoint(pos);
       target = e.waypoint;
     }
 
     // 地形回避
     const gh = getHeight(pos.x, pos.z);
-    if(pos.y < gh + 40) target = _v2.copy(target).setY(pos.y + 120);
+    if(pos.y < gh + 60) target = _v2.copy(target).setY(pos.y + 150);
 
     // 转向（限速）
     _m1.lookAt(pos, _v2.copy(pos).sub(_v1.copy(target).sub(pos)), AXIS_Y);
     _q1.setFromRotationMatrix(_m1);
-    e.obj.quaternion.rotateTowards(_q1, (dist < 1100 ? 1.1 : 0.55) * dt);
+    e.obj.quaternion.rotateTowards(_q1, (dist < 1600 ? 0.9 : 0.5) * dt);
 
     // 推进
     _fwd.set(0,0,1).applyQuaternion(e.obj.quaternion);
     pos.addScaledVector(_fwd, e.speed*dt);
-    e.prop.rotation.z += 45*dt;
+
+    // 尾焰脉动
+    const bs = 0.9 + Math.sin(performance.now()*0.02 + pos.x)*0.15;
+    e.burner.scale.set(bs, bs, 1.4);
 
     // 开火窗口
     e.fireCd -= dt;
-    if(P.alive && dist < 420 && e.fireCd <= 0){
+    if(P.alive && dist < 650 && e.fireCd <= 0){
       const aim = _v1.copy(P.pos).sub(pos).normalize();
-      if(aim.dot(_fwd) > 0.985){
-        e.fireCd = 0.09 + Math.random()*0.06;
-        spawnBullet(pos.clone().addScaledVector(_fwd, 6), aim, false);
+      if(aim.dot(_fwd) > 0.992){
+        e.fireCd = 0.08 + Math.random()*0.06;
+        spawnBullet(pos.clone().addScaledVector(_fwd, 7), aim, false);
       }
     }
   }
@@ -623,6 +695,7 @@ function gameOver(){
   $('start-btn').textContent = '再 战 一 局';
   $('overlay').style.display = 'flex';
   $('hud').style.display = 'none';
+  document.body.classList.remove('ingame');
 }
 function startWave(){
   G.wave++;
@@ -636,11 +709,13 @@ function resetGame(){
   for(const b of bullets) scene.remove(b.mesh);
   bullets.length = 0;
   G.score = 0; G.kills = 0; G.wave = 0; G.over = false; G.running = true; wavePending = false;
-  P.pos.set(0, 220, 0); P.quat.identity();
-  P.speed = 55; P.throttle = 0.55; P.hp = 100; P.alive = true;
+  P.pos.set(0, 260, 0); P.quat.identity();
+  P.speed = 140; P.throttle = 0.5; P.hp = 100; P.alive = true; P.bank = 0;
+  player.visual.rotation.z = 0;
   player.group.visible = true;
   $('overlay').style.display = 'none';
   $('hud').style.display = 'block';
+  document.body.classList.add('ingame');
   startWave();
 }
 
@@ -664,8 +739,8 @@ function updateHUD(dt){
 
   if(P.alive){
     if(Math.hypot(P.pos.x, P.pos.z) > WORLD*0.85) showWarn('⚠ 返回战场！');
-    else if(P.pos.y > 1500) showWarn('⚠ 超过实用升限');
-    else if(P.speed < 34) showWarn('⚠ 失速警告');
+    else if(P.pos.y > 2600) showWarn('⚠ 超过实用升限');
+    else if(P.speed < 112) showWarn('⚠ 失速警告');
   }
 }
 
@@ -684,8 +759,8 @@ function initAudio(){
 }
 function engineSound(){
   if(!AC) return;
-  engineOsc.frequency.value = 55 + P.throttle * 95;
-  engineGain.gain.value = P.alive ? 0.04 + P.throttle*0.03 : 0;
+  engineOsc.frequency.value = 90 + P.throttle * 180;   // 喷气机高频呼啸
+  engineGain.gain.value = P.alive ? 0.03 + P.throttle*0.03 : 0;
 }
 function gunSound(){
   if(!AC) return;
