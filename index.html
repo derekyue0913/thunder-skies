@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>雷霆空战 · Thunder Skies</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14;
+    font-family:"Segoe UI","PingFang SC","Microsoft YaHei",monospace; }
+  canvas { display:block; }
+
+  /* ---------- HUD ---------- */
+  #hud { position:fixed; inset:0; pointer-events:none; z-index:10; color:#d8e6c8;
+    text-shadow:0 0 4px rgba(0,0,0,.8); display:none; }
+  .panel { position:absolute; background:rgba(8,14,10,.55); border:1px solid rgba(150,200,140,.35);
+    border-radius:6px; padding:10px 14px; backdrop-filter:blur(3px); }
+  #stats { top:16px; left:16px; min-width:190px; font-size:14px; line-height:1.9; }
+  #stats .v { color:#ffd35c; font-weight:700; font-family:Consolas,monospace; float:right; margin-left:14px; }
+  #score-panel { top:16px; right:16px; text-align:right; font-size:14px; line-height:1.9; min-width:150px; }
+  #score-panel .v { color:#ffd35c; font-weight:700; font-family:Consolas,monospace; }
+  #score-panel .big { font-size:26px; color:#ffefb0; }
+  #health-panel { bottom:20px; left:16px; width:240px; }
+  .bar { height:10px; background:#222; border-radius:5px; overflow:hidden; margin-top:6px;
+    border:1px solid rgba(150,200,140,.3); }
+  .bar > div { height:100%; width:100%; border-radius:5px;
+    background:linear-gradient(90deg,#67c06a,#a8e063); transition:width .2s; }
+  #thr-bar > div { background:linear-gradient(90deg,#4aa3df,#7ee0ff); }
+  #warn { position:absolute; top:18%; width:100%; text-align:center; font-size:22px;
+    color:#ff7a5c; font-weight:700; letter-spacing:4px; opacity:0; transition:opacity .3s; }
+  #msg { position:absolute; top:26%; width:100%; text-align:center; font-size:30px;
+    color:#ffefb0; font-weight:800; letter-spacing:6px; opacity:0; transition:opacity .4s;
+    text-shadow:0 0 18px rgba(255,180,60,.6); }
+  #feed { position:absolute; right:16px; top:34%; text-align:right; font-size:14px; }
+  #feed div { margin:4px 0; color:#ffd35c; animation:feedfade 3s forwards; }
+  @keyframes feedfade { 0%{opacity:0; transform:translateX(30px);} 10%{opacity:1; transform:none;} 75%{opacity:1;} 100%{opacity:0;} }
+
+  /* 准星 */
+  #crosshair { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); }
+  #crosshair::before, #crosshair::after { content:""; position:absolute; background:rgba(220,255,200,.85); }
+  #crosshair::before { width:2px; height:18px; left:-1px; top:-9px; }
+  #crosshair::after { width:18px; height:2px; left:-9px; top:-1px; }
+  #hitmark { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%) rotate(45deg);
+    opacity:0; }
+  #hitmark::before, #hitmark::after { content:""; position:absolute; background:#ffd35c; }
+  #hitmark::before { width:3px; height:26px; left:-1.5px; top:-13px; }
+  #hitmark::after { width:26px; height:3px; left:-13px; top:-1.5px; }
+
+  /* 受击红闪 */
+  #dmg { position:fixed; inset:0; pointer-events:none; z-index:9; opacity:0;
+    background:radial-gradient(ellipse at center, transparent 40%, rgba(200,20,10,.55) 100%); }
+
+  /* ---------- 覆盖层 ---------- */
+  #overlay { position:fixed; inset:0; z-index:20; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; background:rgba(5,8,12,.82); color:#e8f0dc;
+    backdrop-filter:blur(6px); text-align:center; }
+  #overlay h1 { font-size:52px; letter-spacing:12px; color:#ffefb0;
+    text-shadow:0 0 30px rgba(255,180,60,.5); margin-bottom:8px; }
+  #overlay h2 { font-size:15px; letter-spacing:6px; color:#8fae7f; font-weight:400; margin-bottom:36px; }
+  #overlay .keys { font-size:14px; line-height:2.1; color:#b8c8a8; margin-bottom:34px; }
+  #overlay .keys b { color:#ffd35c; display:inline-block; min-width:110px; text-align:right; margin-right:12px; }
+  #start-btn { pointer-events:auto; cursor:pointer; font-size:20px; letter-spacing:8px;
+    padding:14px 52px 14px 60px; color:#0a0e14; font-weight:800; border:none; border-radius:4px;
+    background:linear-gradient(135deg,#ffd35c,#ff9a3c); box-shadow:0 0 24px rgba(255,180,60,.4);
+    transition:transform .15s, box-shadow .15s; }
+  #start-btn:hover { transform:scale(1.06); box-shadow:0 0 40px rgba(255,180,60,.7); }
+  #final { font-size:18px; color:#ffd35c; margin-bottom:28px; line-height:2; display:none; }
+  #vignette { position:fixed; inset:0; pointer-events:none; z-index:5;
+    box-shadow:inset 0 0 180px rgba(0,0,0,.55); }
+</style>
+</head>
+<body>
+<div id="vignette"></div>
+<div id="dmg"></div>
+
+<div id="hud">
+  <div class="panel" id="stats">
+    <div>空速 <span class="v" id="spd">0</span></div>
+    <div>高度 <span class="v" id="alt">0</span></div>
+    <div>油门 <span class="v" id="thr">0%</span></div>
+    <div class="bar" id="thr-bar"><div id="thr-fill" style="width:50%"></div></div>
+  </div>
+  <div class="panel" id="score-panel">
+    <div class="big" id="score">0</div>
+    <div>击毁 <span class="v" id="kills">0</span></div>
+    <div>波次 <span class="v" id="wave">1</span></div>
+    <div>敌机 <span class="v" id="foes">0</span></div>
+  </div>
+  <div class="panel" id="health-panel">
+    <div style="font-size:13px; letter-spacing:2px;">机体结构</div>
+    <div class="bar"><div id="hp-fill"></div></div>
+  </div>
+  <div id="warn"></div>
+  <div id="msg"></div>
+  <div id="feed"></div>
+  <div id="crosshair"></div>
+  <div id="hitmark"></div>
+</div>
+
+<div id="overlay">
+  <h1>雷霆空战</h1>
+  <h2>THUNDER SKIES · 街机空战原型</h2>
+  <div id="final"></div>
+  <div class="keys">
+    <div><b>W / S 或 ↑ / ↓</b>俯仰（S / ↓ 拉杆爬升）</div>
+    <div><b>A / D 或 ← / →</b>滚转转向</div>
+    <div><b>Shift / Ctrl</b>油门加 / 减</div>
+    <div><b>空格</b>机炮射击</div>
+    <div><b>Q / E</b>方向舵微调</div>
+  </div>
+  <button id="start-btn">开 始 战 斗</button>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* ============================================================
+   基础：渲染器 / 场景 / 光照
+============================================================ */
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87b5d6);
+scene.fog = new THREE.Fog(0x9dc3dd, 300, 3200);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 6000);
+camera.position.set(0, 60, -40);
+
+const hemi = new THREE.HemisphereLight(0xbfd9ff, 0x5a6b4a, 0.9);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff2d8, 1.6);
+sun.position.set(800, 1200, 400);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -200; sun.shadow.camera.right = 200;
+sun.shadow.camera.top = 200; sun.shadow.camera.bottom = -200;
+sun.shadow.camera.far = 4000;
+scene.add(sun);
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+/* ============================================================
+   地形：数值噪声 + 顶点着色 + 湖泊
+============================================================ */
+function hash2(x, y){ const s = Math.sin(x*127.1 + y*311.7) * 43758.5453; return s - Math.floor(s); }
+function fade(t){ return t*t*(3-2*t); }
+function vnoise(x, y){
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x-xi, yf = y-yi;
+  const a = hash2(xi,yi), b = hash2(xi+1,yi), c = hash2(xi,yi+1), d = hash2(xi+1,yi+1);
+  const u = fade(xf), v = fade(yf);
+  return a + (b-a)*u + (c-a)*v + (a-b-c+d)*u*v;
+}
+function fbm(x, y){
+  let v = 0, amp = 1, f = 1;
+  for(let i=0;i<4;i++){ v += amp * vnoise(x*f, y*f); amp *= 0.5; f *= 2.03; }
+  return v;
+}
+function getHeight(x, z){ return fbm(x*0.0011 + 7.3, z*0.0011 + 3.1) * 170 - 25; }
+
+const WORLD = 3400;
+const terraGeo = new THREE.PlaneGeometry(WORLD*2, WORLD*2, 180, 180);
+terraGeo.rotateX(-Math.PI/2);
+{
+  const pos = terraGeo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  const cSand = new THREE.Color(0xc2b280), cGrass = new THREE.Color(0x5d8a4a),
+        cDark  = new THREE.Color(0x3e5c33), cRock  = new THREE.Color(0x8a8578),
+        cSnow  = new THREE.Color(0xeef2f5);
+  const tmp = new THREE.Color();
+  for(let i=0;i<pos.count;i++){
+    const x = pos.getX(i), z = pos.getZ(i);
+    const h = getHeight(x, z);
+    pos.setY(i, h);
+    if(h < 2)       tmp.copy(cSand);
+    else if(h < 55) tmp.copy(cGrass).lerp(cDark, h/55);
+    else if(h < 130) tmp.copy(cDark).lerp(cRock, (h-55)/75);
+    else            tmp.copy(cRock).lerp(cSnow, Math.min(1,(h-130)/60));
+    tmp.offsetHSL(0, 0, (hash2(x*0.7, z*0.7)-0.5)*0.04);
+    colors[i*3]=tmp.r; colors[i*3+1]=tmp.g; colors[i*3+2]=tmp.b;
+  }
+  terraGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  terraGeo.computeVertexNormals();
+}
+const terrain = new THREE.Mesh(terraGeo, new THREE.MeshStandardMaterial({ vertexColors:true, roughness:1 }));
+terrain.receiveShadow = true;
+scene.add(terrain);
+
+const water = new THREE.Mesh(
+  new THREE.PlaneGeometry(WORLD*2, WORLD*2).rotateX(-Math.PI/2),
+  new THREE.MeshStandardMaterial({ color:0x2e6b8a, transparent:true, opacity:0.82, roughness:0.25, metalness:0.4 })
+);
+water.position.y = 0.5;
+scene.add(water);
+
+/* 树木点缀 */
+{
+  const treeGeo = new THREE.ConeGeometry(2.2, 7, 6);
+  const treeMat = new THREE.MeshStandardMaterial({ color:0x2f5527, roughness:1 });
+  const trees = new THREE.InstancedMesh(treeGeo, treeMat, 900);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3();
+  let placed = 0;
+  while(placed < 900){
+    const x = (Math.random()-0.5)*WORLD*1.7, z = (Math.random()-0.5)*WORLD*1.7;
+    const h = getHeight(x, z);
+    if(h < 3 || h > 90) continue;
+    const sc = 0.8 + Math.random()*1.4;
+    m.compose(new THREE.Vector3(x, h+3*sc, z), q, s.set(sc,sc,sc));
+    trees.setMatrixAt(placed++, m);
+  }
+  trees.castShadow = true;
+  scene.add(trees);
+}
+
+/* 云 */
+const clouds = new THREE.Group();
+{
+  const cm = new THREE.MeshStandardMaterial({ color:0xffffff, transparent:true, opacity:0.75, roughness:1 });
+  for(let i=0;i<36;i++){
+    const cl = new THREE.Group();
+    const n = 3 + Math.floor(Math.random()*3);
+    for(let j=0;j<n;j++){
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(14+Math.random()*20, 10, 8), cm);
+      puff.position.set((Math.random()-0.5)*70, (Math.random()-0.5)*10, (Math.random()-0.5)*30);
+      puff.scale.y = 0.45;
+      cl.add(puff);
+    }
+    cl.position.set((Math.random()-0.5)*WORLD*2, 260+Math.random()*420, (Math.random()-0.5)*WORLD*2);
+    clouds.add(cl);
+  }
+  scene.add(clouds);
+}
+
+/* ============================================================
+   飞机建模（程序化低多边形）
+============================================================ */
+function buildAircraft(bodyColor, wingColor){
+  const g = new THREE.Group();
+  const matBody = new THREE.MeshStandardMaterial({ color:bodyColor, metalness:0.35, roughness:0.55 });
+  const matWing = new THREE.MeshStandardMaterial({ color:wingColor, metalness:0.3, roughness:0.6 });
+  const matGlass = new THREE.MeshStandardMaterial({ color:0x9fd8ef, metalness:0.8, roughness:0.15 });
+
+  // 机身（前向 +Z）
+  const fus = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.28, 7, 10).rotateX(Math.PI/2), matBody);
+  g.add(fus);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.4, 10).rotateX(Math.PI/2), matBody);
+  nose.position.z = 4.2;
+  g.add(nose);
+  const cockpit = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 8), matGlass);
+  cockpit.position.set(0, 0.55, 0.8); cockpit.scale.set(0.8, 0.7, 1.6);
+  g.add(cockpit);
+
+  // 主翼 / 平尾 / 垂尾
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(10.5, 0.14, 1.9), matWing);
+  wing.position.set(0, -0.1, 0.4);
+  g.add(wing);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.12, 1.1), matWing);
+  tail.position.set(0, 0.15, -3.2);
+  g.add(tail);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.4, 1.3), matWing);
+  fin.position.set(0, 0.7, -3.2);
+  g.add(fin);
+
+  // 螺旋桨
+  const prop = new THREE.Group();
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.22, 3.2, 0.08),
+    new THREE.MeshStandardMaterial({ color:0x222222 }));
+  const blade2 = blade.clone(); blade2.rotation.z = Math.PI/2;
+  prop.add(blade, blade2);
+  prop.position.z = 5.0;
+  g.add(prop);
+
+  // 翼下机炮（用于弹道起点）
+  const gunL = new THREE.Object3D(); gunL.position.set(-2.2, -0.1, 1.4); g.add(gunL);
+  const gunR = new THREE.Object3D(); gunR.position.set( 2.2, -0.1, 1.4); g.add(gunR);
+
+  g.traverse(o => { if(o.isMesh){ o.castShadow = true; } });
+  return { group:g, prop, gunL, gunR };
+}
+
+/* ============================================================
+   玩家
+============================================================ */
+const player = buildAircraft(0x4a6741, 0x3b5233);
+scene.add(player.group);
+
+const P = {
+  pos: new THREE.Vector3(0, 220, 0),
+  quat: new THREE.Quaternion(),
+  speed: 55, throttle: 0.55, hp: 100,
+  alive: true, fireTimer: 0, gunSide: 0,
+};
+player.group.position.copy(P.pos);
+
+const keys = {};
+addEventListener('keydown', e => { keys[e.code] = true; if(e.code==='Space') e.preventDefault(); });
+addEventListener('keyup',   e => { keys[e.code] = false; });
+
+const AXIS_X = new THREE.Vector3(1,0,0), AXIS_Y = new THREE.Vector3(0,1,0), AXIS_Z = new THREE.Vector3(0,0,1);
+const _dq = new THREE.Quaternion(), _fwd = new THREE.Vector3(), _up = new THREE.Vector3();
+
+function updatePlayer(dt){
+  if(!P.alive) return;
+
+  // ---- 输入 ----
+  let pitch = 0, roll = 0, yaw = 0;
+  if(keys['KeyS'] || keys['ArrowDown']) pitch += 1;   // 拉杆
+  if(keys['KeyW'] || keys['ArrowUp'])   pitch -= 1;   // 推杆
+  if(keys['KeyA'] || keys['ArrowLeft']) roll += 1;
+  if(keys['KeyD'] || keys['ArrowRight']) roll -= 1;
+  if(keys['KeyQ']) yaw += 1;
+  if(keys['KeyE']) yaw -= 1;
+  if(keys['ShiftLeft'] || keys['ShiftRight']) P.throttle = Math.min(1, P.throttle + 0.6*dt);
+  if(keys['ControlLeft'] || keys['ControlRight']) P.throttle = Math.max(0.15, P.throttle - 0.6*dt);
+
+  // ---- 姿态 ----
+  const rollRate = 2.2, pitchRate = 1.25, yawRate = 0.55;
+  _dq.setFromAxisAngle(AXIS_X, pitch * pitchRate * dt); P.quat.multiply(_dq);
+  _dq.setFromAxisAngle(AXIS_Z, roll  * rollRate  * dt); P.quat.multiply(_dq);
+  _dq.setFromAxisAngle(AXIS_Y, yaw   * yawRate   * dt); P.quat.multiply(_dq);
+  // 协调转弯：滚转自动带一点偏航
+  const bank = new THREE.Vector3(1,0,0).applyQuaternion(P.quat).y;
+  _dq.setFromAxisAngle(AXIS_Y, -bank * 0.9 * dt); P.quat.multiply(_dq);
+  P.quat.normalize();
+
+  // ---- 速度 / 位置 ----
+  const target = 22 + P.throttle * 105;
+  P.speed += (target - P.speed) * Math.min(1, 0.7*dt);
+  _fwd.set(0,0,1).applyQuaternion(P.quat);
+  const vel = _fwd.clone().multiplyScalar(P.speed);
+  if(P.speed < 38) vel.y -= (38 - P.speed) * 0.55;   // 失速下坠
+  P.pos.addScaledVector(vel, dt);
+
+  // ---- 撞地 ----
+  const gh = getHeight(P.pos.x, P.pos.z);
+  if(P.pos.y < Math.max(gh, 0.5) + 1.6){
+    P.pos.y = Math.max(gh, 0.5) + 1.6;
+    crashPlayer();
+  }
+
+  player.group.position.copy(P.pos);
+  player.group.quaternion.copy(P.quat);
+  player.prop.rotation.z += (8 + P.throttle*40) * dt;
+
+  // ---- 开火 ----
+  P.fireTimer -= dt;
+  if(keys['Space'] && P.fireTimer <= 0){
+    P.fireTimer = 1/14;
+    const gun = (P.gunSide ^= 1) ? player.gunL : player.gunR;
+    const gp = new THREE.Vector3(); gun.getWorldPosition(gp);
+    spawnBullet(gp, _fwd, true);
+    gunSound();
+  }
+}
+
+/* ============================================================
+   追机视角
+============================================================ */
+const camPos = new THREE.Vector3().copy(P.pos).add(new THREE.Vector3(0,4,-14));
+function updateCamera(dt){
+  _fwd.set(0,0,1).applyQuaternion(P.quat);
+  _up.set(0,1,0).applyQuaternion(P.quat);
+  const desired = P.pos.clone()
+    .addScaledVector(_fwd, -13)
+    .addScaledVector(_up, 4);
+  camPos.lerp(desired, 1 - Math.pow(0.0005, dt));
+  camera.position.copy(camPos);
+  camera.up.set(0,1,0);
+  camera.lookAt(P.pos.clone().addScaledVector(_fwd, 30));
+  camera.fov = 68 + (P.speed/127) * 14;   // 速度感
+  camera.updateProjectionMatrix();
+  sun.position.copy(P.pos).add(new THREE.Vector3(800, 1200, 400));
+  sun.target = player.group;
+}
+
+/* ============================================================
+   子弹
+============================================================ */
+const bullets = [];
+const bulletGeoP = new THREE.BoxGeometry(0.14, 0.14, 3.2);
+const bulletMatP = new THREE.MeshBasicMaterial({ color:0xffe98a });
+const bulletMatE = new THREE.MeshBasicMaterial({ color:0xff5533 });
+
+function spawnBullet(origin, dir, fromPlayer){
+  const m = new THREE.Mesh(bulletGeoP, fromPlayer ? bulletMatP : bulletMatE);
+  m.position.copy(origin);
+  m.quaternion.setFromUnitVectors(AXIS_Z, dir.clone().normalize());
+  scene.add(m);
+  const spread = fromPlayer ? 0.008 : 0.03;
+  const d = dir.clone().normalize();
+  d.x += (Math.random()-0.5)*spread; d.y += (Math.random()-0.5)*spread; d.z += (Math.random()-0.5)*spread;
+  bullets.push({
+    mesh:m, fromPlayer, life:2.2,
+    vel: d.normalize().multiplyScalar(fromPlayer ? 380 : 300)
+         .add(fromPlayer ? _fwd.clone().multiplyScalar(P.speed) : new THREE.Vector3()),
+  });
+}
+
+function updateBullets(dt){
+  for(let i = bullets.length-1; i >= 0; i--){
+    const b = bullets[i];
+    b.mesh.position.addScaledVector(b.vel, dt);
+    b.life -= dt;
+    let dead = b.life <= 0;
+
+    if(!dead && b.fromPlayer){
+      for(const e of enemies){
+        if(!e.alive) continue;
+        if(b.mesh.position.distanceToSquared(e.obj.position) < 30){
+          dead = true;
+          e.hp -= 1;
+          spark(b.mesh.position, 0xffd35c);
+          showHitmark();
+          if(e.hp <= 0) killEnemy(e);
+          break;
+        }
+      }
+    } else if(!dead && P.alive){
+      if(b.mesh.position.distanceToSquared(P.pos) < 22){
+        dead = true;
+        damagePlayer(7);
+        spark(b.mesh.position, 0xff5533);
+      }
+    }
+    if(!dead && b.mesh.position.y < getHeight(b.mesh.position.x, b.mesh.position.z)){
+      dead = true; spark(b.mesh.position, 0xbbaa88);
+    }
+    if(dead){
+      scene.remove(b.mesh);
+      bullets.splice(i, 1);
+    }
+  }
+}
+
+/* ============================================================
+   粒子特效（火花 / 爆炸）
+============================================================ */
+const particles = [];
+function burst(pos, count, color, speed, size, life){
+  const geo = new THREE.BufferGeometry();
+  const p = new Float32Array(count*3), v = [];
+  for(let i=0;i<count;i++){
+    p[i*3]=pos.x; p[i*3+1]=pos.y; p[i*3+2]=pos.z;
+    const a = Math.random()*Math.PI*2, b = Math.acos(2*Math.random()-1);
+    const s = speed*(0.3+Math.random()*0.7);
+    v.push(new THREE.Vector3(Math.sin(b)*Math.cos(a)*s, Math.cos(b)*s, Math.sin(b)*Math.sin(a)*s));
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(p, 3));
+  const mat = new THREE.PointsMaterial({ color, size, transparent:true, opacity:1,
+    blending:THREE.AdditiveBlending, depthWrite:false });
+  const pts = new THREE.Points(geo, mat);
+  scene.add(pts);
+  particles.push({ pts, v, life, maxLife:life });
+}
+function spark(pos, color){ burst(pos, 10, color, 30, 1.2, 0.35); }
+function explode(pos){
+  burst(pos, 70, 0xff9a3c, 55, 3.2, 1.1);
+  burst(pos, 40, 0xffe0a0, 80, 2.0, 0.6);
+  burst(pos, 30, 0x444444, 25, 4.5, 1.6);
+  boomSound();
+}
+function updateParticles(dt){
+  for(let i = particles.length-1; i >= 0; i--){
+    const pa = particles[i];
+    const p = pa.pts.geometry.attributes.position;
+    for(let j=0;j<pa.v.length;j++){
+      p.array[j*3]   += pa.v[j].x*dt;
+      p.array[j*3+1] += pa.v[j].y*dt;
+      p.array[j*3+2] += pa.v[j].z*dt;
+      pa.v[j].y -= 18*dt;
+    }
+    p.needsUpdate = true;
+    pa.life -= dt;
+    pa.pts.material.opacity = Math.max(0, pa.life / pa.maxLife);
+    if(pa.life <= 0){
+      scene.remove(pa.pts);
+      pa.pts.geometry.dispose(); pa.pts.material.dispose();
+      particles.splice(i, 1);
+    }
+  }
+}
+
+/* ============================================================
+   敌机 AI
+============================================================ */
+const enemies = [];
+const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q1 = new THREE.Quaternion();
+const _m1 = new THREE.Matrix4();
+
+function spawnEnemy(){
+  const model = buildAircraft(0x6e3a2e, 0x55291f);
+  const ang = Math.random()*Math.PI*2;
+  const dist = 700 + Math.random()*900;
+  const pos = new THREE.Vector3(
+    P.pos.x + Math.cos(ang)*dist,
+    Math.max(120, P.pos.y + (Math.random()-0.5)*400),
+    P.pos.z + Math.sin(ang)*dist);
+  model.group.position.copy(pos);
+  scene.add(model.group);
+  const e = {
+    obj: model.group, prop: model.prop, hp: 3, alive: true,
+    speed: 62 + Math.random()*18, fireCd: 1 + Math.random()*2,
+    waypoint: randomWaypoint(pos),
+  };
+  // 初始朝向：面向玩家
+  _m1.lookAt(pos, _v1.copy(pos).sub(_v2.copy(P.pos).sub(pos)), AXIS_Y);
+  e.obj.quaternion.setFromRotationMatrix(_m1);
+  enemies.push(e);
+}
+function randomWaypoint(near){
+  return new THREE.Vector3(
+    THREE.MathUtils.clamp(near.x + (Math.random()-0.5)*1600, -WORLD*0.9, WORLD*0.9),
+    100 + Math.random()*500,
+    THREE.MathUtils.clamp(near.z + (Math.random()-0.5)*1600, -WORLD*0.9, WORLD*0.9));
+}
+
+function updateEnemies(dt){
+  for(const e of enemies){
+    if(!e.alive) continue;
+    const pos = e.obj.position;
+    const toPlayer = _v1.copy(P.pos).sub(pos);
+    const dist = toPlayer.length();
+
+    // 目标选择：追玩家 / 巡逻
+    let target;
+    if(P.alive && dist < 1100){
+      // 前置量瞄准点
+      target = _v2.copy(P.pos)
+        .addScaledVector(_fwd.set(0,0,1).applyQuaternion(P.quat), P.speed * dist/300 * 0.6);
+    } else {
+      if(pos.distanceTo(e.waypoint) < 120) e.waypoint = randomWaypoint(pos);
+      target = e.waypoint;
+    }
+
+    // 地形回避
+    const gh = getHeight(pos.x, pos.z);
+    if(pos.y < gh + 40) target = _v2.copy(target).setY(pos.y + 120);
+
+    // 转向（限速）
+    _m1.lookAt(pos, _v2.copy(pos).sub(_v1.copy(target).sub(pos)), AXIS_Y);
+    _q1.setFromRotationMatrix(_m1);
+    e.obj.quaternion.rotateTowards(_q1, (dist < 1100 ? 1.1 : 0.55) * dt);
+
+    // 推进
+    _fwd.set(0,0,1).applyQuaternion(e.obj.quaternion);
+    pos.addScaledVector(_fwd, e.speed*dt);
+    e.prop.rotation.z += 45*dt;
+
+    // 开火窗口
+    e.fireCd -= dt;
+    if(P.alive && dist < 420 && e.fireCd <= 0){
+      const aim = _v1.copy(P.pos).sub(pos).normalize();
+      if(aim.dot(_fwd) > 0.985){
+        e.fireCd = 0.09 + Math.random()*0.06;
+        spawnBullet(pos.clone().addScaledVector(_fwd, 6), aim, false);
+      }
+    }
+  }
+}
+
+function killEnemy(e){
+  e.alive = false;
+  explode(e.obj.position);
+  scene.remove(e.obj);
+  G.kills++; G.score += 100;
+  feed(`击毁敌机！+100`);
+}
+
+/* ============================================================
+   游戏状态 / HUD
+============================================================ */
+const G = { running:false, score:0, kills:0, wave:0, over:false };
+let wavePending = false;
+const $ = id => document.getElementById(id);
+let msgTimer = 0, warnTimer = 0, hitTimer = 0;
+
+function feed(text){
+  const d = document.createElement('div');
+  d.textContent = text;
+  $('feed').prepend(d);
+  setTimeout(() => d.remove(), 3200);
+}
+function showMsg(text, ms=2200){
+  $('msg').textContent = text;
+  $('msg').style.opacity = 1;
+  msgTimer = ms/1000;
+}
+function showWarn(text){ $('warn').textContent = text; warnTimer = 0.4; }
+function showHitmark(){ $('hitmark').style.opacity = 1; hitTimer = 0.12; }
+
+function damagePlayer(n){
+  if(!P.alive) return;
+  P.hp -= n;
+  $('dmg').style.opacity = 0.9;
+  setTimeout(() => $('dmg').style.opacity = 0, 180);
+  if(P.hp <= 0){ P.hp = 0; crashPlayer(); }
+}
+function crashPlayer(){
+  if(!P.alive) return;
+  P.alive = false;
+  explode(P.pos);
+  player.group.visible = false;
+  setTimeout(gameOver, 1400);
+}
+function gameOver(){
+  G.over = true; G.running = false;
+  $('final').style.display = 'block';
+  $('final').innerHTML =
+    `战机坠毁 —— 最终得分 <b style="font-size:26px">${G.score}</b><br>` +
+    `击毁 ${G.kills} 架 · 坚持到第 ${G.wave} 波`;
+  $('start-btn').textContent = '再 战 一 局';
+  $('overlay').style.display = 'flex';
+  $('hud').style.display = 'none';
+}
+function startWave(){
+  G.wave++;
+  const n = Math.min(3 + G.wave, 9);
+  for(let i=0;i<n;i++) spawnEnemy();
+  showMsg(`第 ${G.wave} 波 · ${n} 架敌机来袭`);
+}
+function resetGame(){
+  for(const e of enemies) if(e.alive) scene.remove(e.obj);
+  enemies.length = 0;
+  for(const b of bullets) scene.remove(b.mesh);
+  bullets.length = 0;
+  G.score = 0; G.kills = 0; G.wave = 0; G.over = false; G.running = true; wavePending = false;
+  P.pos.set(0, 220, 0); P.quat.identity();
+  P.speed = 55; P.throttle = 0.55; P.hp = 100; P.alive = true;
+  player.group.visible = true;
+  $('overlay').style.display = 'none';
+  $('hud').style.display = 'block';
+  startWave();
+}
+
+function updateHUD(dt){
+  $('spd').textContent = Math.round(P.speed*3.6) + ' km/h';
+  $('alt').textContent = Math.round(P.pos.y - getHeight(P.pos.x, P.pos.z)) + ' m';
+  $('thr').textContent = Math.round(P.throttle*100) + '%';
+  $('thr-fill').style.width = (P.throttle*100) + '%';
+  $('hp-fill').style.width = P.hp + '%';
+  $('hp-fill').style.background = P.hp > 50
+    ? 'linear-gradient(90deg,#67c06a,#a8e063)'
+    : P.hp > 25 ? 'linear-gradient(90deg,#e0a63c,#ffd35c)' : 'linear-gradient(90deg,#d33,#ff7a5c)';
+  $('score').textContent = G.score;
+  $('kills').textContent = G.kills;
+  $('wave').textContent = G.wave;
+  $('foes').textContent = enemies.filter(e=>e.alive).length;
+
+  if(msgTimer > 0){ msgTimer -= dt; if(msgTimer <= 0) $('msg').style.opacity = 0; }
+  if(warnTimer > 0){ warnTimer -= dt; $('warn').style.opacity = warnTimer > 0 ? 1 : 0; }
+  if(hitTimer > 0){ hitTimer -= dt; if(hitTimer <= 0) $('hitmark').style.opacity = 0; }
+
+  if(P.alive){
+    if(Math.hypot(P.pos.x, P.pos.z) > WORLD*0.85) showWarn('⚠ 返回战场！');
+    else if(P.pos.y > 1500) showWarn('⚠ 超过实用升限');
+    else if(P.speed < 34) showWarn('⚠ 失速警告');
+  }
+}
+
+/* ============================================================
+   程序化音效（WebAudio）
+============================================================ */
+let AC = null, engineOsc = null, engineGain = null;
+function initAudio(){
+  if(AC) return;
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  engineOsc = AC.createOscillator(); engineOsc.type = 'sawtooth';
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 320;
+  engineGain = AC.createGain(); engineGain.gain.value = 0.05;
+  engineOsc.connect(lp).connect(engineGain).connect(AC.destination);
+  engineOsc.start();
+}
+function engineSound(){
+  if(!AC) return;
+  engineOsc.frequency.value = 55 + P.throttle * 95;
+  engineGain.gain.value = P.alive ? 0.04 + P.throttle*0.03 : 0;
+}
+function gunSound(){
+  if(!AC) return;
+  const t = AC.currentTime;
+  const buf = AC.createBuffer(1, AC.sampleRate*0.07, AC.sampleRate);
+  const d = buf.getChannelData(0);
+  for(let i=0;i<d.length;i++) d[i] = (Math.random()*2-1) * (1 - i/d.length);
+  const src = AC.createBufferSource(); src.buffer = buf;
+  const hp = AC.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 900;
+  const g = AC.createGain(); g.gain.setValueAtTime(0.22, t); g.gain.exponentialRampToValueAtTime(0.001, t+0.07);
+  src.connect(hp).connect(g).connect(AC.destination); src.start();
+}
+function boomSound(){
+  if(!AC) return;
+  const t = AC.currentTime;
+  const buf = AC.createBuffer(1, AC.sampleRate*0.7, AC.sampleRate);
+  const d = buf.getChannelData(0);
+  for(let i=0;i<d.length;i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/d.length, 1.6);
+  const src = AC.createBufferSource(); src.buffer = buf;
+  const lp = AC.createBiquadFilter(); lp.type='lowpass';
+  lp.frequency.setValueAtTime(1200, t); lp.frequency.exponentialRampToValueAtTime(90, t+0.6);
+  const g = AC.createGain(); g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.001, t+0.7);
+  src.connect(lp).connect(g).connect(AC.destination); src.start();
+}
+
+/* ============================================================
+   主循环
+============================================================ */
+const clock = new THREE.Clock();
+function loop(){
+  requestAnimationFrame(loop);
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  if(G.running){
+    updatePlayer(dt);
+    updateEnemies(dt);
+    updateBullets(dt);
+    updateHUD(dt);
+    engineSound();
+    // 本波清空 → 下一波
+    if(enemies.length && !wavePending && enemies.every(e => !e.alive)){
+      wavePending = true;
+      G.score += 250;
+      feed('波次肃清！+250');
+      setTimeout(() => {
+        wavePending = false;
+        if(G.running) startWave();
+      }, 1800);
+    }
+  }
+  updateParticles(dt);
+  clouds.children.forEach((c,i) => { c.position.x += (2+i%3)*dt; if(c.position.x > WORLD) c.position.x = -WORLD; });
+  updateCamera(dt);
+  renderer.render(scene, camera);
+}
+
+$('start-btn').addEventListener('click', () => { initAudio(); AC && AC.resume(); resetGame(); });
+loop();
+</script>
+</body>
+</html>
